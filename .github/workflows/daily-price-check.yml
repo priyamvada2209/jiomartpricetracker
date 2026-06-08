@@ -1,0 +1,46 @@
+name: Daily JioMart Price Check
+
+on:
+  schedule:
+    # 6 AM IST = 00:30 UTC
+    - cron: '30 0 * * *'
+
+  workflow_dispatch:
+
+jobs:
+  run-price-check:
+    runs-on: ubuntu-latest
+
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      JIOMART_API_URL: ${{ secrets.JIOMART_API_URL }}
+      JIOMART_AUTHORIZATION: ${{ secrets.JIOMART_AUTHORIZATION }}
+
+      LATITUDE: ${{ secrets.LATITUDE }}
+      LONGITUDE: ${{ secrets.LONGITUDE }}
+      POLYGON_ID: ${{ secrets.POLYGON_ID }}
+
+      CITY: ${{ secrets.CITY }}
+      PINCODE: ${{ secrets.PINCODE }}
+      STATE: ${{ secrets.STATE }}
+      COUNTRY: ${{ secrets.COUNTRY }}
+      COUNTRY_ISO_CODE: ${{ secrets.COUNTRY_ISO_CODE }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run price tracker
+        run: |
+          python main.py
