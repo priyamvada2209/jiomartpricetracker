@@ -2,8 +2,8 @@ name: Daily JioMart Price Check
 
 on:
   schedule:
-    # 6 AM IST = 00:30 UTC
-    - cron: '30 0 * * *'
+    # 8.30 AM IST = 3 am UTC
+    - cron: '0 3 * * *'
 
   workflow_dispatch:
 
