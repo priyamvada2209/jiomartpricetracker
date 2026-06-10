@@ -51,8 +51,8 @@ def main() -> None:
     scheduler.run_price_tracker_job()
 
     # Start daily scheduling
-    logger.info("Initializing daily scheduler loop...")
-    scheduler.start_scheduler()
+    # logger.info("Initializing daily scheduler loop...")
+    # scheduler.start_scheduler()
 
 if __name__ == "__main__":
     main()
