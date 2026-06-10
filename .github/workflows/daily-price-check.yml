@@ -1,10 +1,11 @@
 name: Daily JioMart Price Check
 
 on:
+  push:
+    branches:
+      - main
   schedule:
-    # 8.30 AM IST = 3 am UTC
-    - cron: '*/5 * * * *' # Every 5 minutes for testing, change to '30 3 * * *' for daily at 8:30 AM IST
-
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:
