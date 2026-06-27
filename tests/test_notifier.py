@@ -1,49 +1,133 @@
+from __future__ import annotations
+
+import importlib
+import sys
+
 import pytest
-from unittest.mock import patch, MagicMock
-import os
-import requests
 
-from jiomart_price_tracker.notifier import send_message
 
-@patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test_token", "TELEGRAM_CHAT_ID": "test_chat_id"})
-@patch("jiomart_price_tracker.notifier.requests.post")
-def test_send_message_success(mock_post):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"ok": True}
-    mock_post.return_value = mock_response
+@pytest.fixture()
+def isolated_app(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("JIOMART_API_URL", "https://example.com/api")
+    monkeypatch.setenv("JIOMART_AUTHORIZATION", "test-auth")
+    monkeypatch.setenv("LATITUDE", "1")
+    monkeypatch.setenv("LONGITUDE", "1")
+    monkeypatch.setenv("POLYGON_ID", "1")
+    monkeypatch.setenv("CITY", "Test City")
+    monkeypatch.setenv("PINCODE", "000000")
+    monkeypatch.setenv("STATE", "Test State")
+    monkeypatch.setenv("COUNTRY", "Test Country")
+    monkeypatch.setenv("COUNTRY_ISO_CODE", "TC")
 
-    send_message("Hello World")
+    for module_name in [
+        "jiomart_price_tracker.config",
+        "jiomart_price_tracker.models",
+        "jiomart_price_tracker.database",
+        "jiomart_price_tracker.fetcher",
+        "jiomart_price_tracker.repositories",
+        "jiomart_price_tracker.summary",
+        "jiomart_price_tracker.services",
+    ]:
+        sys.modules.pop(module_name, None)
 
-    mock_post.assert_called_once_with(
-        "https://api.telegram.org/bottest_token/sendMessage",
-        json={"chat_id": "test_chat_id", "text": "Hello World"},
-        timeout=30
-    )
+    import jiomart_price_tracker.config as config
+    import jiomart_price_tracker.models as models
+    import jiomart_price_tracker.database as database
+    import jiomart_price_tracker.fetcher as fetcher
+    import jiomart_price_tracker.repositories as repositories
+    import jiomart_price_tracker.services as services
 
-@patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test_token", "TELEGRAM_CHAT_ID": "test_chat_id"})
-@patch("jiomart_price_tracker.notifier.requests.post")
-def test_send_message_non_200_status(mock_post):
-    mock_response = MagicMock()
-    mock_response.status_code = 403
-    mock_response.text = "Forbidden"
-    mock_post.return_value = mock_response
+    importlib.reload(config)
+    importlib.reload(models)
+    importlib.reload(database)
+    importlib.reload(fetcher)
+    importlib.reload(repositories)
+    importlib.reload(services)
+    database.init_db()
 
-    with pytest.raises(Exception, match="Telegram API returned non-200 status code: 403"):
-        send_message("Hello World")
+    return {
+        "config": config,
+        "models": models,
+        "database": database,
+        "fetcher": fetcher,
+        "repositories": repositories,
+        "services": services,
+    }
 
-@patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "test_token", "TELEGRAM_CHAT_ID": "test_chat_id"})
-@patch("jiomart_price_tracker.notifier.requests.post")
-def test_send_message_ok_false(mock_post):
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"ok": False, "description": "Bad Request"}
-    mock_post.return_value = mock_response
 
-    with pytest.raises(Exception, match='Telegram returned {"ok": false}'):
-        send_message("Hello World")
+def test_telegram_user_upsert_and_toggle_notifications(isolated_app):
+    database = isolated_app["database"]
+    repositories = isolated_app["repositories"]
+    models = isolated_app["models"]
 
-@patch.dict(os.environ, {}, clear=True)
-def test_send_message_missing_env_vars():
-    with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing from environment variables"):
-        send_message("Hello World")
+    with database.get_db() as session:
+        repositories.upsert_telegram_user(
+            session,
+            telegram_chat_id=101,
+            telegram_user_id=202,
+            username="alice",
+            first_name="Alice",
+            notifications_enabled=True,
+        )
+
+    with database.get_db() as session:
+        user = session.query(models.TelegramUser).filter_by(telegram_chat_id=101).one()
+        assert user.username == "alice"
+        assert user.notifications_enabled is True
+
+        repositories.set_notifications_enabled(session, 101, False)
+
+    with database.get_db() as session:
+        user = session.query(models.TelegramUser).filter_by(telegram_chat_id=101).one()
+        assert user.notifications_enabled is False
+        active_users = repositories.list_active_telegram_users(session)
+        assert active_users == []
+
+
+def test_price_service_stores_and_reads_latest_prices(isolated_app):
+    database = isolated_app["database"]
+    fetcher = isolated_app["fetcher"]
+    services = isolated_app["services"]
+    models = isolated_app["models"]
+
+    def fake_fetcher():
+        return [
+            fetcher.ProductPrice(
+                product_name="Sugar",
+                slug="sugar",
+                size="1 kg",
+                effective_price=42.0,
+                marked_price=50.0,
+                discount="16%",
+                is_serviceable=True,
+            ),
+            fetcher.ProductPrice(
+                product_name="Rice",
+                slug="rice",
+                size="1 kg",
+                effective_price=0.0,
+                marked_price=0.0,
+                discount="",
+                is_serviceable=False,
+            ),
+        ]
+
+    service = services.PriceService(session_factory=database.get_db, product_fetcher=fake_fetcher)
+    summary = service.fetch_store_and_build_summary()
+    assert "JioMart Daily Prices" in summary
+    assert "Sugar" in summary
+    assert "Rs 42" in summary
+    assert "Rice" in summary
+    assert "Not Serviceable" in summary
+
+    latest_summary = service.latest_stored_summary()
+    assert "Latest stored JioMart prices" in latest_summary
+    assert "Sugar" in latest_summary
+    assert "Rice" in latest_summary
+
+    with database.get_db() as session:
+        records = session.query(models.PriceHistory).order_by(models.PriceHistory.id.asc()).all()
+        assert len(records) == 2
+        assert records[0].price == 42.0
+        assert records[1].price is None

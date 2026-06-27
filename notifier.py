@@ -1,31 +1,22 @@
+from __future__ import annotations
+
+import asyncio
 import os
-import requests
-import logging
 
-logger = logging.getLogger(__name__)
 
-def send_message(text: str) -> None:
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    
-    if not token or not chat_id:
-        raise ValueError("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing from environment variables")
+def send_message(text: str, chat_id: int) -> None:
+    async def _send() -> None:
+        try:
+            from telegram import Bot
+        except ImportError as exc:  # pragma: no cover - environment specific
+            raise RuntimeError(
+                "python-telegram-bot is required. Install dependencies from requirements.txt."
+            ) from exc
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
-    
-    response = requests.post(url, json=payload, timeout=30)
-    
-    if response.status_code != 200:
-        logger.error(f"Telegram API request failed with status code {response.status_code}: {response.text}")
-        raise Exception(f"Telegram API returned non-200 status code: {response.status_code}")
-        
-    data = response.json()
-    if not data.get("ok"):
-        logger.error(f"Telegram API request failed: {data}")
-        raise Exception('Telegram returned {"ok": false}')
-        
-    logger.info("Successfully sent Telegram notification.")
+        bot_token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+        if not bot_token:
+            raise ValueError("BOT_TOKEN is required to send Telegram messages.")
+
+        await Bot(token=bot_token).send_message(chat_id=chat_id, text=text)
+
+    asyncio.run(_send())

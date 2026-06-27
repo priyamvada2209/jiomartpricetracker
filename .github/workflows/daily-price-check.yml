@@ -15,8 +15,6 @@ jobs:
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       JIOMART_API_URL: ${{ secrets.JIOMART_API_URL }}
       JIOMART_AUTHORIZATION: ${{ secrets.JIOMART_AUTHORIZATION }}
@@ -46,4 +44,4 @@ jobs:
 
       - name: Run price tracker
         run: |
-          python main.py
+          python -m jiomart_price_tracker.jobs

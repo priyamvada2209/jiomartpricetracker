@@ -165,3 +165,7 @@ cython_debug/
 price_tracker.log
 prices.db
 *.db
+
+.tmp/
+.pycache_tmp/
+pytest-cache-files-*/
