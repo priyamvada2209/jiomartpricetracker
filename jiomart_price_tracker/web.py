@@ -5,6 +5,7 @@ Flask application factory for the Telegram webhook and health checks.
 from __future__ import annotations
 
 import logging
+import threading
 from functools import lru_cache
 
 from flask import Flask, jsonify, request
@@ -55,14 +56,27 @@ def create_app() -> Flask:
 
     app = Flask(__name__)
     app.config["JSON_SORT_KEYS"] = False
+    app.config["TELEGRAM_RUNTIME_STARTED"] = False
+    app.config["TELEGRAM_RUNTIME_LOCK"] = threading.Lock()
 
-    @app.before_serving
-    def start_runtime() -> None:
-        runtime = get_telegram_runtime()
-        scheduler = get_scheduler()
-        runtime.start()
-        scheduler.start()
-        app.logger.info("Telegram runtime and scheduler started in worker process.")
+    def ensure_runtime_started() -> None:
+        if app.config["TELEGRAM_RUNTIME_STARTED"]:
+            return
+
+        with app.config["TELEGRAM_RUNTIME_LOCK"]:
+            if app.config["TELEGRAM_RUNTIME_STARTED"]:
+                return
+
+            runtime = get_telegram_runtime()
+            scheduler = get_scheduler()
+            runtime.start()
+            scheduler.start()
+            app.config["TELEGRAM_RUNTIME_STARTED"] = True
+            app.logger.info("Telegram runtime and scheduler started in worker process.")
+
+    @app.before_request
+    def start_runtime_once() -> None:
+        ensure_runtime_started()
 
     @app.get("/health")
     def health() -> tuple[dict[str, str], int]:
