@@ -71,13 +71,21 @@ def create_app() -> Flask:
     @app.post("/webhook")
     def webhook() -> tuple[object, int]:
         payload = request.get_json(silent=True)
+        logger = logging.getLogger(__name__)
         if not isinstance(payload, dict):
+            logger.warning("Rejected webhook request with invalid payload type: %s", type(payload).__name__)
             return jsonify({"ok": False, "error": "Invalid Telegram update payload"}), 400
+
+        logger.info(
+            "Webhook request accepted: update_id=%s keys=%s",
+            payload.get("update_id"),
+            sorted(payload.keys()),
+        )
 
         try:
             runtime.submit_webhook_payload(payload)
         except Exception:
-            logging.getLogger(__name__).exception("Webhook processing failed.")
+            logger.exception("Webhook processing failed.")
             return jsonify({"ok": False, "error": "Failed to process update"}), 500
 
         return jsonify({"ok": True}), 200

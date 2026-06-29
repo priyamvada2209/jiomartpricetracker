@@ -95,6 +95,7 @@ class TelegramBotRuntime:
         self._thread: threading.Thread | None = None
         self._started = False
         self._register_handlers()
+        self.application.add_error_handler(self._handle_telegram_error)
 
     def _register_handlers(self) -> None:
         self.application.add_handler(self._CommandHandler("start", self.handle_start))
@@ -125,6 +126,11 @@ class TelegramBotRuntime:
         return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
 
     def submit_webhook_payload(self, payload: dict[str, Any]):
+        logger.info(
+            "Webhook payload received: update_id=%s keys=%s",
+            payload.get("update_id"),
+            sorted(payload.keys()),
+        )
         future = self._submit(self._process_payload(payload))
         future.add_done_callback(self._log_background_exception)
         return future
@@ -135,13 +141,27 @@ class TelegramBotRuntime:
         except Exception:
             logger.exception("Webhook update processing failed.")
 
+    async def _handle_telegram_error(self, update: Any, context: Any) -> None:
+        logger.exception(
+            "Telegram handler error for update_id=%s error=%s",
+            getattr(update, "update_id", None),
+            getattr(context, "error", None),
+        )
+
     async def _initialize(self) -> None:
+        logger.info("Initializing Telegram application and setting webhook %s", config.webhook_url)
         await self.application.initialize()
         await self.application.start()
         await self.application.bot.set_webhook(url=config.webhook_url, drop_pending_updates=True)
 
     async def _process_payload(self, payload: dict[str, Any]) -> None:
         update = self._Update.de_json(payload, self.application.bot)
+        logger.info(
+            "Processing update_id=%s chat_id=%s user_id=%s",
+            getattr(update, "update_id", None),
+            getattr(getattr(update, "effective_chat", None), "id", None),
+            getattr(getattr(update, "effective_user", None), "id", None),
+        )
         await self.application.process_update(update)
 
     async def process_webhook_payload(self, payload: dict[str, Any]) -> None:
@@ -153,6 +173,7 @@ class TelegramBotRuntime:
         for attempt in range(1, max_attempts + 1):
             try:
                 await self.application.bot.send_message(chat_id=chat_id, text=text)
+                logger.info("Sent Telegram message to chat_id=%s", chat_id)
                 return
             except self._RetryAfter as exc:
                 wait_seconds = max(float(exc.retry_after), 1.0)
@@ -170,6 +191,7 @@ class TelegramBotRuntime:
 
     async def broadcast_summary(self, summary: str) -> None:
         users = await asyncio.to_thread(self._list_active_users)
+        logger.info("Broadcasting summary to %s active Telegram users.", len(users))
         for user in users:
             try:
                 await self._send_message_with_retry(user.telegram_chat_id, summary)
@@ -200,6 +222,7 @@ class TelegramBotRuntime:
         chat = update.effective_chat
         user = update.effective_user
         if chat is None or user is None or update.message is None:
+            logger.warning("/start received without chat or user context.")
             return
 
         await asyncio.to_thread(
@@ -209,10 +232,12 @@ class TelegramBotRuntime:
             user.username,
             user.first_name,
         )
+        logger.info("Registered/updated Telegram user chat_id=%s user_id=%s", chat.id, user.id)
         await update.message.reply_text(START_MESSAGE)
 
     async def handle_today(self, update: Any, context: Any) -> None:
         if update.message is None:
+            logger.warning("/today received without message context.")
             return
 
         try:
@@ -222,10 +247,12 @@ class TelegramBotRuntime:
             await update.message.reply_text(TODAY_ERROR_MESSAGE)
             return
 
+        logger.info("Sending fresh price summary to chat_id=%s", update.effective_chat.id if update.effective_chat else None)
         await update.message.reply_text(summary)
 
     async def handle_prices(self, update: Any, context: Any) -> None:
         if update.message is None:
+            logger.warning("/prices received without message context.")
             return
 
         try:
@@ -235,22 +262,29 @@ class TelegramBotRuntime:
             await update.message.reply_text(PRICES_ERROR_MESSAGE)
             return
 
+        logger.info("Sending stored price summary to chat_id=%s", update.effective_chat.id if update.effective_chat else None)
         await update.message.reply_text(summary)
 
     async def handle_help(self, update: Any, context: Any) -> None:
         if update.message is None:
+            logger.warning("/help received without message context.")
             return
 
+        logger.info("Help command requested for chat_id=%s", update.effective_chat.id if update.effective_chat else None)
         await update.message.reply_text(HELP_MESSAGE)
 
     async def handle_stop(self, update: Any, context: Any) -> None:
         chat = update.effective_chat
         if chat is None or update.message is None:
+            logger.warning("/stop received without chat or message context.")
             return
 
         await asyncio.to_thread(self._disable_notifications, chat.id)
+        logger.info("Disabled notifications for chat_id=%s", chat.id)
         await update.message.reply_text(STOP_MESSAGE)
 
     async def run_daily_summary_cycle(self) -> None:
+        logger.info("Starting daily summary cycle.")
         summary = await asyncio.to_thread(self.price_service.fetch_store_and_build_summary)
         await self.broadcast_summary(summary)
+        logger.info("Finished daily summary cycle.")
