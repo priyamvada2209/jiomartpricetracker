@@ -135,6 +135,9 @@ class TelegramBotRuntime:
         future.add_done_callback(self._log_background_exception)
         return future
 
+    def process_webhook_payload(self, payload: dict[str, Any]):
+        return self.submit_webhook_payload(payload)
+
     def _log_background_exception(self, future: Any) -> None:
         try:
             future.result()

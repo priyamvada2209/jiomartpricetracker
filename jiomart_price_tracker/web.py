@@ -83,7 +83,7 @@ def create_app() -> Flask:
         )
 
         try:
-            runtime.process_webhook_payload(payload)
+            runtime.submit_webhook_payload(payload)
         except Exception:
             logger.exception("Webhook processing failed.")
             return jsonify({"ok": False, "error": "Failed to process update"}), 500
