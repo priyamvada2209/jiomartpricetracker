@@ -13,6 +13,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session, sessionmaker
 
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+
 from . import config
 from .models import Base
 
@@ -32,6 +35,20 @@ def _normalize_database_url(database_url: str) -> str:
     return f"sqlite:///{resolved_path}"
 
 
+# def _build_engine(database_url: str):
+#     if database_url in {"sqlite://", "sqlite:///:memory:"}:
+#         return create_engine(
+#             database_url,
+#             connect_args={"check_same_thread": False},
+#             poolclass=StaticPool,
+#             future=True,
+#         )
+
+#     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+#     return create_engine(database_url, connect_args=connect_args, future=True)
+
+
+
 def _build_engine(database_url: str):
     if database_url in {"sqlite://", "sqlite:///:memory:"}:
         return create_engine(
@@ -41,9 +58,22 @@ def _build_engine(database_url: str):
             future=True,
         )
 
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, connect_args=connect_args, future=True)
+    connect_args = {}
 
+    if database_url.startswith("sqlite"):
+        connect_args["check_same_thread"] = False
+
+    elif database_url.startswith("mysql+pymysql"):
+        # Required for Aiven MySQL
+        connect_args["ssl"] = {}
+
+    return create_engine(
+        database_url,
+        connect_args=connect_args,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        future=True,
+    )
 
 database_url = _normalize_database_url(config.database_url)
 engine = _build_engine(database_url)
