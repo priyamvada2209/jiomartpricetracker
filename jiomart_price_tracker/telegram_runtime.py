@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from typing import Any
@@ -91,8 +90,6 @@ class TelegramBotRuntime:
         self.price_service = price_service
         self._session_factory = session_factory
         self.application = self._Application.builder().token(config.bot_token).build()
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
         self._started = False
         self._register_handlers()
         self.application.add_error_handler(self._handle_telegram_error)
@@ -108,38 +105,10 @@ class TelegramBotRuntime:
         if self._started:
             return
 
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run_loop, name="telegram-runtime", daemon=True)
-        self._thread.start()
-        self._submit(self._initialize()).result(timeout=60)
+        logger.info("Initializing Telegram application and setting webhook %s", config.webhook_url)
+        asyncio.run(self._initialize())
         self._started = True
         logger.info("Telegram runtime initialized and webhook configured.")
-
-    def _run_loop(self) -> None:
-        assert self._loop is not None
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_forever()
-
-    def _submit(self, coroutine: Any):
-        if self._loop is None:
-            raise RuntimeError("Telegram runtime has not been started.")
-        return asyncio.run_coroutine_threadsafe(coroutine, self._loop)
-
-    def submit_webhook_payload(self, payload: dict[str, Any]):
-        logger.info(
-            "Webhook payload received: update_id=%s keys=%s",
-            payload.get("update_id"),
-            sorted(payload.keys()),
-        )
-        future = self._submit(self._process_payload(payload))
-        future.add_done_callback(self._log_background_exception)
-        return future
-
-    def _log_background_exception(self, future: Any) -> None:
-        try:
-            future.result()
-        except Exception:
-            logger.exception("Webhook update processing failed.")
 
     async def _handle_telegram_error(self, update: Any, context: Any) -> None:
         logger.exception(
@@ -149,10 +118,17 @@ class TelegramBotRuntime:
         )
 
     async def _initialize(self) -> None:
-        logger.info("Initializing Telegram application and setting webhook %s", config.webhook_url)
         await self.application.initialize()
         await self.application.start()
         await self.application.bot.set_webhook(url=config.webhook_url, drop_pending_updates=True)
+
+    def process_webhook_payload(self, payload: dict[str, Any]) -> None:
+        logger.info(
+            "Webhook payload received: update_id=%s keys=%s",
+            payload.get("update_id"),
+            sorted(payload.keys()),
+        )
+        asyncio.run(self._process_payload(payload))
 
     async def _process_payload(self, payload: dict[str, Any]) -> None:
         update = self._Update.de_json(payload, self.application.bot)
@@ -163,9 +139,6 @@ class TelegramBotRuntime:
             getattr(getattr(update, "effective_user", None), "id", None),
         )
         await self.application.process_update(update)
-
-    async def process_webhook_payload(self, payload: dict[str, Any]) -> None:
-        await asyncio.wrap_future(self._submit(self._process_payload(payload)))
 
     async def _send_message_with_retry(self, chat_id: int, text: str) -> None:
         delay_seconds = 1.0

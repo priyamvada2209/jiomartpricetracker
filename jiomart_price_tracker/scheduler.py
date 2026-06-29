@@ -4,6 +4,7 @@ Background scheduler for the daily JioMart summary.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -38,9 +39,7 @@ class DailyPriceScheduler:
     def _run_daily_job(self) -> None:
         logger.info("Executing scheduled JioMart summary job...")
         try:
-            future = self.runtime._submit(self.runtime.run_daily_summary_cycle())
-            future.result(timeout=900)
+            asyncio.run(self.runtime.run_daily_summary_cycle())
             logger.info("Scheduled JioMart summary job finished successfully.")
         except Exception:
             logger.exception("Scheduled JioMart summary job failed.")
-
