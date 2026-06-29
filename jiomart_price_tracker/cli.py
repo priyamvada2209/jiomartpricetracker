@@ -4,14 +4,13 @@ Command-line helpers for one-off execution.
 
 from __future__ import annotations
 
-import asyncio
-
 from .web import get_telegram_runtime
 
 
 def run_daily_job_once() -> None:
     runtime = get_telegram_runtime()
-    asyncio.run(runtime.run_daily_summary_cycle())
+    future = runtime._submit(runtime.run_daily_summary_cycle())
+    future.result(timeout=900)
 
 
 if __name__ == "__main__":
