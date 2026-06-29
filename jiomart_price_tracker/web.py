@@ -41,28 +41,28 @@ def get_price_service() -> PriceService:
 
 @lru_cache(maxsize=1)
 def get_telegram_runtime() -> TelegramBotRuntime:
-    runtime = TelegramBotRuntime(get_price_service())
-    runtime.start()
-    return runtime
+    return TelegramBotRuntime(get_price_service())
 
 
 @lru_cache(maxsize=1)
 def get_scheduler() -> DailyPriceScheduler:
-    scheduler = DailyPriceScheduler(get_telegram_runtime())
-    scheduler.start()
-    return scheduler
+    return DailyPriceScheduler(get_telegram_runtime())
 
 
 def create_app() -> Flask:
     configure_logging()
     init_db()
-    runtime = get_telegram_runtime()
-    scheduler = get_scheduler()
 
     app = Flask(__name__)
-    app.config["TELEGRAM_RUNTIME"] = runtime
-    app.config["DAILY_SCHEDULER"] = scheduler
     app.config["JSON_SORT_KEYS"] = False
+
+    @app.before_serving
+    def start_runtime() -> None:
+        runtime = get_telegram_runtime()
+        scheduler = get_scheduler()
+        runtime.start()
+        scheduler.start()
+        app.logger.info("Telegram runtime and scheduler started in worker process.")
 
     @app.get("/health")
     def health() -> tuple[dict[str, str], int]:
@@ -83,7 +83,7 @@ def create_app() -> Flask:
         )
 
         try:
-            runtime.submit_webhook_payload(payload)
+            get_telegram_runtime().submit_webhook_payload(payload)
         except Exception:
             logger.exception("Webhook processing failed.")
             return jsonify({"ok": False, "error": "Failed to process update"}), 500
